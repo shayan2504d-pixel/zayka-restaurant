@@ -1,0 +1,12 @@
+const express=require('express');
+const router=express.Router();
+const {v4:uuidv4}=require('uuid');
+const db=require('../db');
+const {verifyToken,requireAdmin}=require('../middleware/auth');
+
+router.get('/',async(req,res)=>{try{const r=await db.query(`SELECT r.*,u.avatar FROM reviews r LEFT JOIN users u ON r.user_id=u.id WHERE r.is_approved=1 ORDER BY r.created_at DESC`);res.json({success:true,count:r.rows.length,reviews:r.rows});}catch(e){res.status(500).json({success:false,message:'Failed to fetch reviews.'});}});
+router.post('/',verifyToken,async(req,res)=>{try{const{customer_name,rating,comment}=req.body;if(!rating||!comment)return res.status(400).json({success:false,message:'Rating and comment are required.'});const id='rev_'+uuidv4().slice(0,8);const userId=req.user?req.user.id:null;const author=(req.user&&req.user.name)?req.user.name:(customer_name||'VIP Patron');const r=await db.query(`INSERT INTO reviews(id,user_id,customer_name,rating,comment,is_approved) VALUES($1,$2,$3,$4,$5,1) RETURNING *`,[id,userId,author.trim(),Math.min(5,Math.max(1,parseInt(rating))),comment.trim()]);res.status(201).json({success:true,message:'Thank you for your valuable review!',review:r.rows[0]});}catch(e){res.status(500).json({success:false,message:'Failed to post review.'});}});
+router.get('/all',requireAdmin,async(req,res)=>{try{const r=await db.query(`SELECT r.*,u.email FROM reviews r LEFT JOIN users u ON r.user_id=u.id ORDER BY r.created_at DESC`);res.json({success:true,count:r.rows.length,reviews:r.rows});}catch(e){res.status(500).json({success:false,message:'Failed to fetch reviews.'});}});
+router.put('/:id/approve',requireAdmin,async(req,res)=>{try{const found=await db.query('SELECT is_approved FROM reviews WHERE id=$1',[req.params.id]);if(!found.rows.length)return res.status(404).json({success:false,message:'Review not found.'});const status=found.rows[0].is_approved?0:1;await db.query('UPDATE reviews SET is_approved=$1 WHERE id=$2',[status,req.params.id]);res.json({success:true,message:`Review ${status?'approved':'hidden'}.`,is_approved:status});}catch(e){res.status(500).json({success:false,message:'Failed to update review status.'});}});
+router.delete('/:id',requireAdmin,async(req,res)=>{try{await db.query('DELETE FROM reviews WHERE id=$1',[req.params.id]);res.json({success:true,message:'Review deleted successfully.'});}catch(e){res.status(500).json({success:false,message:'Failed to delete review.'});}});
+module.exports=router;
